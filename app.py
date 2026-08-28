@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from data import (
+    OFFICIAL_SGX_BASELINE,
     download_history,
     download_histories,
     latest_market_dates,
@@ -16,50 +17,71 @@ from scanner import most_recent_triggered_setup
 
 
 APP_DIR = Path(__file__).resolve().parent
-DEFAULT_TICKERS = APP_DIR / "sgx_tickers.csv"
 RECENT_TRADING_DAYS = 3
 
 st.set_page_config(page_title="SGX Recent Trigger Scanner", page_icon="📈", layout="wide")
 
 st.title("SGX Recent Trigger Scanner")
 st.caption(
-    "Shows only SGX stocks triggered on one of the latest 3 completed trading days. "
-    "Pattern: 3 consecutive higher highs → nearest subsequent 3 consecutive lower lows → "
-    "Open/Close breakout above HH Day-2, provided no earlier Open/Close fell below LL Day-2."
+    "Full-market SGX technical screener excluding REITs and business trusts. "
+    "Shows only counters triggered on one of the latest 3 completed SGX trading days."
 )
 
 with st.sidebar:
     st.header("Scan settings")
     period = st.selectbox("Historical lookback", ["6mo", "1y", "2y", "5y"], index=2)
     st.info("Signal window is fixed at the latest **3 completed SGX trading days**.")
-    st.caption("Today's candle is excluded while the SGX trading day is still in progress.")
+    st.caption("No minimum price, market cap, or volume filter. Penny stocks are included.")
+    st.caption("REITs and business trusts are excluded before price data is downloaded.")
 
 try:
-    ticker_df, universe_source = load_sgx_universe(DEFAULT_TICKERS)
+    ticker_df, universe_source, universe_stats = load_sgx_universe()
 except Exception as exc:
-    st.error(f"Could not load SGX ticker universe: {exc}")
+    st.error("Could not load the live SGX universe, so the app will not run a partial-market scan.")
+    st.code(str(exc))
+    st.info("Please retry later. The app intentionally avoids falling back to the old 25-counter starter list.")
     st.stop()
 
-c1, c2 = st.columns(2)
-c1.metric("SGX counters to scan", len(ticker_df))
-c2.metric("Trigger window", "3 trading days")
-st.caption(f"Universe source: {universe_source}")
+st.subheader("Universe coverage")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("SGX official baseline", OFFICIAL_SGX_BASELINE)
+c2.metric("Live securities loaded", universe_stats["source_records"])
+c3.metric("REITs / trusts removed", universe_stats["excluded_reit_trust"])
+c4.metric("Eligible counters", universe_stats["eligible"])
+
+if universe_stats["source_records"] != OFFICIAL_SGX_BASELINE:
+    st.warning(
+        f"The live source currently returned {universe_stats['source_records']} unique securities versus the "
+        f"604-security reference baseline. Listings/delistings or source coverage can change over time. "
+        "The scanner reports the actual number loaded rather than claiming 604 when it did not receive 604."
+    )
+
+st.caption(
+    f"Universe source: {universe_source}. Removed: "
+    f"{universe_stats['excluded_reit']} REIT-classified and "
+    f"{universe_stats['excluded_business_trust']} trust/business-trust-classified counters."
+)
 
 if "recent_trigger_results" not in st.session_state:
     st.session_state.recent_trigger_results = pd.DataFrame()
 if "recent_trigger_dates" not in st.session_state:
     st.session_state.recent_trigger_dates = []
+if "scan_coverage" not in st.session_state:
+    st.session_state.scan_coverage = {}
 
-if st.button("Scan all SGX stocks", type="primary", use_container_width=True):
+if st.button("Scan eligible SGX stocks", type="primary", use_container_width=True):
     tickers = ticker_df["Ticker"].tolist()
 
     status_text = st.empty()
     progress = st.progress(0)
-    status_text.text(f"Downloading daily OHLC data for {len(tickers)} SGX counters...")
+    status_text.text(f"Downloading daily OHLC data for {len(tickers)} eligible SGX counters...")
 
     histories = download_histories(tickers, period=period)
     market_dates = latest_market_dates(histories, RECENT_TRADING_DAYS)
     st.session_state.recent_trigger_dates = market_dates
+
+    usable_count = sum(1 for df in histories.values() if df is not None and not df.empty)
+    unavailable_count = len(tickers) - usable_count
 
     rows = []
     total = len(ticker_df)
@@ -79,8 +101,6 @@ if st.button("Scan all SGX stocks", type="primary", use_container_width=True):
                         close_col = close_col.iloc[:, 0]
                     current_close = float(pd.to_numeric(close_col, errors="coerce").dropna().iloc[-1])
 
-                    # Entry follows the user's rule: if Open itself is already above HH2,
-                    # use Open; otherwise the Close is the breakout entry reference.
                     if setup.breakout_open is not None and setup.breakout_open > setup.upper_trigger:
                         entry_price = float(setup.breakout_open)
                         entry_type = "Open"
@@ -114,7 +134,6 @@ if st.button("Scan all SGX stocks", type="primary", use_container_width=True):
                         }
                     )
             except Exception:
-                # A failed/unsupported Yahoo symbol should not stop the full-market scan.
                 pass
 
         progress.progress(pos / total)
@@ -122,26 +141,36 @@ if st.button("Scan all SGX stocks", type="primary", use_container_width=True):
     status_text.empty()
     progress.empty()
     st.session_state.recent_trigger_results = pd.DataFrame(rows)
+    st.session_state.scan_coverage = {
+        "eligible": len(tickers),
+        "usable": usable_count,
+        "unavailable": unavailable_count,
+        "triggered": len(rows),
+    }
 
 market_dates = st.session_state.recent_trigger_dates
 if market_dates:
     formatted = ", ".join(pd.Timestamp(d).strftime("%d %b %Y") for d in market_dates)
     st.success(f"Latest completed SGX trading dates used: {formatted}")
 
+coverage = st.session_state.scan_coverage
+if coverage:
+    st.subheader("Last scan coverage")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Eligible universe", coverage["eligible"])
+    c2.metric("Usable Yahoo OHLC", coverage["usable"])
+    c3.metric("No/insufficient data", coverage["unavailable"])
+    c4.metric("Triggered ≤3 days", coverage["triggered"])
+
 results = st.session_state.recent_trigger_results.copy()
 
 if results.empty:
     if market_dates:
-        st.info("No SGX counters triggered on any of the latest 3 completed trading days.")
+        st.info("No eligible SGX counters triggered on any of the latest 3 completed trading days.")
     else:
-        st.info("Press **Scan all SGX stocks** to find newly triggered counters.")
+        st.info("Press **Scan eligible SGX stocks** to find newly triggered counters.")
 else:
     results = results.sort_values(["Trigger Date", "Ticker"], ascending=[False, True]).reset_index(drop=True)
-
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Recent triggers", len(results))
-    c2.metric("Newest trigger date", str(results["Trigger Date"].max()))
-    c3.metric("Universe scanned", len(ticker_df))
 
     st.subheader("Triggered within the latest 3 trading days")
     shortlist_cols = [
@@ -162,7 +191,7 @@ else:
     st.download_button(
         "Download recent triggers CSV",
         data=results.to_csv(index=False).encode("utf-8"),
-        file_name="sgx_recent_3day_triggers.csv",
+        file_name="sgx_recent_3day_triggers_ex_reit_trust.csv",
         mime="text/csv",
     )
 
@@ -193,6 +222,6 @@ else:
     st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
-    "Technical research screener only — not an investment recommendation. The live universe endpoint may occasionally "
-    "be unavailable; when that happens the app uses the bundled fallback ticker list and labels it accordingly."
+    "Technical research screener only — not an investment recommendation. REITs and business trusts are excluded. "
+    "Penny stocks remain included. Yahoo symbols can be missing or suspended, so scan coverage is shown explicitly."
 )

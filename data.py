@@ -3,14 +3,15 @@ from __future__ import annotations
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 from datetime import datetime, time
+import re
 
 import pandas as pd
 import requests
-import yfinance as yf
 
 
 STOCKSSG_COMPANIES_URL = "https://stocks.com.sg/api/v1/companies"
 SG_TZ = ZoneInfo("Asia/Singapore")
+OFFICIAL_SGX_BASELINE = 604
 
 
 def _yahoo_ticker(code: str) -> str:
@@ -20,49 +21,141 @@ def _yahoo_ticker(code: str) -> str:
     return f"{code}.SI"
 
 
-@lru_cache(maxsize=2)
-def load_sgx_universe_from_web() -> pd.DataFrame:
-    """Load the current SGX company universe from StocksSG's public companies API.
+def _row_text(row: dict) -> str:
+    """Flatten likely classification/name fields for exclusion checks."""
+    keys = (
+        "company_name",
+        "name",
+        "company",
+        "security_name",
+        "security_type",
+        "asset_class",
+        "instrument_type",
+        "type",
+        "category",
+        "industry",
+        "sector",
+        "classification",
+        "sub_industry",
+    )
+    values = []
+    for key in keys:
+        value = row.get(key)
+        if value is not None:
+            values.append(str(value))
+    return " | ".join(values).upper()
 
-    The endpoint is used only to obtain company/ticker names. Price data still comes
-    from Yahoo Finance. If the endpoint is unavailable, the app falls back to the
-    bundled CSV.
+
+def exclusion_reason(row: dict) -> str | None:
+    """Return why a security is excluded, otherwise None.
+
+    User rule: exclude REITs and business trusts.  The source API may expose
+    classification metadata differently over time, so we use both metadata and
+    conservative name checks.  A security whose name/classification contains
+    the standalone word TRUST is excluded; this intentionally captures business
+    trusts whose legal names do not literally contain the phrase 'Business Trust'.
+    """
+    text = _row_text(row)
+
+    if re.search(r"\bREIT\b", text) or "REAL ESTATE INVESTMENT TRUST" in text:
+        return "REIT"
+
+    if "BUSINESS TRUST" in text:
+        return "Business Trust"
+
+    # Captures listed trusts such as '* Trust' even when the API omits subtype.
+    if re.search(r"\bTRUST\b", text):
+        return "Trust / Business Trust"
+
+    return None
+
+
+@lru_cache(maxsize=2)
+def load_sgx_universe_from_web() -> tuple[pd.DataFrame, dict]:
+    """Load SGX securities and remove REITs/business trusts before scanning.
+
+    Returns (eligible_universe, stats).  Price data still comes from Yahoo
+    Finance.  No price, market-cap, or liquidity filter is applied, so penny
+    stocks remain eligible.
     """
     response = requests.get(STOCKSSG_COMPANIES_URL, timeout=20)
     response.raise_for_status()
     payload = response.json()
     rows = payload.get("data", []) if isinstance(payload, dict) else []
 
-    out = []
+    eligible = []
+    excluded = []
+    seen_codes: set[str] = set()
+
     for row in rows:
         if not isinstance(row, dict):
             continue
+
         code = row.get("ticker") or row.get("symbol") or row.get("code")
         company = row.get("company_name") or row.get("name") or row.get("company") or code
         if not code:
             continue
+
         code = str(code).strip().upper()
         if not code or code.startswith("^"):
             continue
-        out.append({"Ticker": _yahoo_ticker(code), "Company": str(company or code).strip()})
 
-    df = pd.DataFrame(out)
-    if df.empty:
-        raise ValueError("SGX company API returned no usable tickers.")
-    return df.drop_duplicates("Ticker").sort_values("Ticker").reset_index(drop=True)
+        ticker = _yahoo_ticker(code)
+        if ticker in seen_codes:
+            continue
+        seen_codes.add(ticker)
+
+        reason = exclusion_reason(row)
+        record = {
+            "Ticker": ticker,
+            "Company": str(company or code).strip(),
+        }
+
+        if reason:
+            record["Exclusion Reason"] = reason
+            excluded.append(record)
+        else:
+            eligible.append(record)
+
+    eligible_df = pd.DataFrame(eligible, columns=["Ticker", "Company"])
+    if eligible_df.empty:
+        raise ValueError("SGX company API returned no usable eligible securities.")
+
+    excluded_df = pd.DataFrame(excluded)
+    stats = {
+        "official_baseline": OFFICIAL_SGX_BASELINE,
+        "source_records": len(seen_codes),
+        "excluded_reit_trust": len(excluded_df),
+        "eligible": len(eligible_df),
+        "excluded_reit": int((excluded_df.get("Exclusion Reason", pd.Series(dtype=str)) == "REIT").sum()),
+        "excluded_business_trust": int(
+            excluded_df.get("Exclusion Reason", pd.Series(dtype=str)).isin(
+                ["Business Trust", "Trust / Business Trust"]
+            ).sum()
+        ),
+    }
+
+    eligible_df = eligible_df.sort_values("Ticker").reset_index(drop=True)
+    return eligible_df, stats
 
 
-def load_sgx_universe(fallback_path) -> tuple[pd.DataFrame, str]:
-    """Return (universe, source_label), using the bundled CSV as a fallback."""
-    try:
-        return load_sgx_universe_from_web(), "Live SGX company universe"
-    except Exception:
-        return load_ticker_file(fallback_path), "Bundled fallback ticker list"
+def load_sgx_universe(fallback_path=None) -> tuple[pd.DataFrame, str, dict]:
+    """Return the live full-market eligible universe.
+
+    We deliberately do not silently fall back to the old small starter list,
+    because doing so would violate the user's requirement to scan the full SGX
+    universe (less REITs/business trusts).  The app should surface the source
+    error and ask the user to retry instead of claiming a partial market scan.
+    """
+    universe, stats = load_sgx_universe_from_web()
+    return universe, "Live SGX securities universe (REITs & business trusts excluded)", stats
 
 
 @lru_cache(maxsize=1024)
 def download_history(ticker: str, period: str = "2y") -> pd.DataFrame:
     """Download daily OHLCV data for one Yahoo Finance ticker."""
+    import yfinance as yf
+
     data = yf.download(
         ticker,
         period=period,
@@ -93,17 +186,14 @@ def _extract_ticker_frame(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
 
 def download_histories(tickers: list[str], period: str = "2y", batch_size: int = 40) -> dict[str, pd.DataFrame]:
-    """Batch-download daily data for a full SGX universe.
-
-    Batching cuts the number of remote requests dramatically compared with one
-    request per stock, which matters on Streamlit Community Cloud.
-    """
+    """Batch-download daily data for the eligible SGX universe."""
     histories: dict[str, pd.DataFrame] = {}
     clean = [str(t).strip().upper() for t in tickers if str(t).strip()]
 
     for start in range(0, len(clean), batch_size):
         batch = clean[start : start + batch_size]
         try:
+            import yfinance as yf
             raw = yf.download(
                 batch,
                 period=period,
@@ -124,11 +214,7 @@ def download_histories(tickers: list[str], period: str = "2y", batch_size: int =
 
 
 def completed_daily_bars(df: pd.DataFrame) -> pd.DataFrame:
-    """Exclude today's still-forming daily candle while SGX is open.
-
-    Signals should be based on completed Open/High/Low/Close candles. After a
-    conservative 17:15 Singapore-time cutoff, today's daily bar may be retained.
-    """
+    """Exclude today's still-forming daily candle while SGX is open."""
     if df is None or df.empty:
         return pd.DataFrame()
 
@@ -165,6 +251,7 @@ def latest_market_dates(histories: dict[str, pd.DataFrame], count: int = 3) -> l
 
 
 def load_ticker_file(path_or_buffer) -> pd.DataFrame:
+    """Retained for local/manual testing; not used as full-market fallback."""
     df = pd.read_csv(path_or_buffer)
     df.columns = [str(c).strip() for c in df.columns]
 
