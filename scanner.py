@@ -154,3 +154,22 @@ def latest_relevant_setup(df: pd.DataFrame) -> PatternSetup | None:
 def scan_one(df: pd.DataFrame) -> dict | None:
     setup = latest_relevant_setup(df)
     return setup.to_dict() if setup else None
+
+
+def most_recent_triggered_setup(
+    df: pd.DataFrame,
+    eligible_dates: Iterable[pd.Timestamp] | None = None,
+) -> PatternSetup | None:
+    """Return the newest triggered setup, optionally restricted to exact market dates.
+
+    `eligible_dates` is intended for screens such as "triggered in the latest 3
+    trading days". Using explicit trading dates is safer than subtracting calendar
+    days because weekends and SGX holidays are naturally handled.
+    """
+    setups = [s for s in find_all_setups(df) if s.status == "TRIGGERED" and s.breakout_date is not None]
+    if eligible_dates is not None:
+        allowed = {pd.Timestamp(d).normalize() for d in eligible_dates}
+        setups = [s for s in setups if pd.Timestamp(s.breakout_date).normalize() in allowed]
+    if not setups:
+        return None
+    return max(setups, key=lambda s: pd.Timestamp(s.breakout_date))

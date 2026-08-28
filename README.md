@@ -1,107 +1,65 @@
-# SGX Technical Pattern Screener
+# SGX Recent Trigger Scanner
 
-A Streamlit app that scans SGX counters for a custom price-action setup.
+A Streamlit technical-research screener for SGX stocks.
 
-## Pattern rule
+## Current rule
 
-1. Find **3 consecutive trading days with higher highs**: `H1 < H2 < H3`.
-2. Store the **High of Day 2** as the upper trigger.
-3. Find the **nearest subsequent** 3-day sequence with lower lows: `L1 > L2 > L3`.
-4. Store the **Low of Day 2** as the lower invalidation level.
-5. Starting after the third lower-low candle:
-   - If any candle **opens OR closes below LL Day-2**, the setup is invalidated.
-   - Otherwise, if a candle **opens OR closes above HH Day-2**, the setup is triggered and the stock is highlighted.
-   - Intraday wicks alone do not trigger or invalidate the setup.
+The app searches each stock for:
 
-The app also shows currently valid **WATCHING** setups that have not yet triggered.
+1. Three consecutive candles with progressively higher highs (`H1 < H2 < H3`).
+2. Store the **High of Day 2 (HH2)** as the upper trigger.
+3. Find the **nearest subsequent** three consecutive candles with progressively lower lows (`L1 > L2 > L3`).
+4. Store the **Low of Day 2 (LL2)** as the invalidation/stop level.
+5. Starting after LL3, the setup is triggered when **Open or Close > HH2**, provided no earlier Open or Close fell below LL2.
 
-## Files
+The dashboard now displays **only stocks whose trigger occurred on one of the latest 3 completed SGX trading days**.
 
-- `app.py` — Streamlit dashboard.
-- `scanner.py` — pattern logic.
-- `data.py` — Yahoo Finance data download and ticker-file handling.
-- `sgx_tickers.csv` — starter SGX ticker universe. Add more rows as needed.
-- `requirements.txt` — Python dependencies.
-- `.streamlit/config.toml` — Streamlit appearance and server configuration.
+## Universe
+
+The app attempts to load the current SGX company universe from the public StocksSG companies API, then converts SGX codes to Yahoo Finance `.SI` symbols. If that source is temporarily unavailable, the bundled `sgx_tickers.csv` is used as a fallback and the UI clearly labels the fallback.
+
+## Price data
+
+Daily OHLC data is downloaded from Yahoo Finance with `yfinance`. The full universe is downloaded in batches for better Streamlit Cloud performance. Today's still-forming daily bar is excluded until after a conservative 17:15 Singapore-time cutoff.
 
 ## Run locally
 
-### 1. Install Python
-
-Use Python 3.10 or newer.
-
-### 2. Create a virtual environment
-
-Windows PowerShell:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-```
-
-macOS/Linux:
-
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python -m venv .venv
 ```
 
-### 3. Install dependencies
+Activate the environment and install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Start the app
+Run:
 
 ```bash
 streamlit run app.py
 ```
 
-## Upload to GitHub
+## Deploy to Streamlit Community Cloud
 
-Create a new empty GitHub repository, then upload the contents of this folder. Do not upload the ZIP file itself if you want GitHub to show the individual project files.
+Use:
 
-Using Git from the project folder:
+- Repository: your GitHub repository
+- Branch: `main`
+- Main file path: `app.py`
 
-```bash
-git init
-git add .
-git commit -m "Initial SGX technical screener"
-git branch -M main
-git remote add origin YOUR_GITHUB_REPOSITORY_URL
-git push -u origin main
-```
+No API key is required for the current version.
 
-## Deploy on Streamlit Community Cloud
+## Files
 
-1. Push this folder to GitHub.
-2. Sign in to Streamlit Community Cloud.
-3. Create a new app from the repository.
-4. Set the main file path to `app.py`.
-5. Deploy.
+- `app.py` — Streamlit dashboard and recent-trigger filtering
+- `scanner.py` — pattern engine
+- `data.py` — SGX universe and Yahoo Finance price-data functions
+- `sgx_tickers.csv` — fallback ticker universe
+- `requirements.txt` — Python dependencies
+- `.streamlit/config.toml` — Streamlit configuration
+- `test_scanner.py` and `test_recent_trigger.py` — logic tests
 
-## Ticker file format
+## Important
 
-Yahoo Finance typically represents SGX counters using the `.SI` suffix.
-
-```csv
-Ticker,Company
-D05.SI,DBS Group Holdings
-O39.SI,Oversea-Chinese Banking Corporation
-U11.SI,United Overseas Bank
-```
-
-You may either edit `sgx_tickers.csv` or upload another CSV from the app sidebar.
-
-## Signal statuses
-
-- `WATCHING` — valid HH/LL structure found; neither breakout nor invalidation has occurred.
-- `TRIGGERED` — Open or Close crossed above HH Day-2 before invalidation.
-- `INVALIDATED` — Open or Close crossed below LL Day-2 first.
-
-## Notes
-
-This project uses Yahoo Finance data via `yfinance`. Yahoo data availability, ticker coverage, corporate-action handling, and rate limits can change. Validate important signals against another market-data source before acting on them.
-
-This tool is for research and screening only and is not an investment recommendation.
+This is a technical screening/research tool, not an investment recommendation. Yahoo symbols can occasionally be missing, delayed, suspended, or affected by corporate actions, so signals should be checked before use.
