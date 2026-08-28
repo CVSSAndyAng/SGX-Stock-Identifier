@@ -1,34 +1,85 @@
-# SGX Multi-Condition Stock Scanner
+# SGX HH/LL + MACD Scanner
 
-A Streamlit scanner for SGX-listed operating-company stocks. Penny stocks are included; REITs and business trusts are excluded.
+A Streamlit technical-research screener for SGX-listed stocks.
 
-## Screening rules
+## Final rules
 
-A counter is shortlisted only when all conditions pass:
+### Universe
+- Uses the live SGX securities universe.
+- Includes penny stocks.
+- Excludes REITs and business trusts.
+- No minimum price, volume, market-cap, or transaction-count requirement.
+- **Condition 2 / transaction activity has been removed.**
 
-1. **Price structure** — find 3 consecutive higher highs, then the nearest subsequent 3 consecutive lower lows. Use HH Day 2 as the upper trigger and LL Day 2 as the invalidation level. A valid trigger occurs when a later candle opens or closes above HH2 without any earlier post-setup candle opening or closing below LL2. Only triggers from the latest 3 completed SGX trading days are shown.
-2. **MACD (12,26,9)** — MACD is rising for 3 consecutive trading days, is above the signal line, and is either positive or no lower than the configurable near-zero floor (default -0.5% of share price).
-3. **Activity** — no upload is required. The app automatically downloads 5-minute Yahoo intraday data. Every one of the prior 20 completed SGX trading days must contain at least 5 separate positive-volume 5-minute bars. Five such bars prove at least five trades occurred that day. This is deliberately conservative because the free Yahoo feed does not expose SGX's exact daily number-of-trades field; a thin counter with 5 trades clustered inside fewer than 5 bars may be rejected.
+### Price-structure condition
+For the selected candle timeframe:
+1. Find 3 consecutive candles with higher highs: `H1 < H2 < H3`.
+2. Store the high of candle 2 as **HH2 trigger**.
+3. Find the nearest subsequent 3 consecutive candles with lower lows: `L1 > L2 > L3`.
+4. Store the low of candle 2 as **LL2 invalidation / stop**.
+5. After LL3, invalidate the setup if any candle **Open or Close < LL2**.
+6. Otherwise trigger when any candle **Open or Close > HH2**.
 
-The app also displays a +10% target and the LL2 stop reference. It is a research screener, not an automatic investment recommendation.
+Intracandle wicks alone do not trigger or invalidate the setup.
 
-## Deploy on Streamlit Community Cloud
+### MACD condition
+Standard MACD `(12, 26, 9)` on the same selected timeframe:
+- MACD rising for 3 consecutive candles;
+- MACD above its signal line;
+- MACD can be slightly negative while rising toward zero;
+- default normalized floor is `-0.5% of price`, adjustable in the sidebar.
 
-1. Upload all files in this folder to the root of your GitHub repository.
-2. In Streamlit Community Cloud, deploy the repository with `app.py` as the main file.
-3. No API key and no transaction CSV upload are required.
-4. Press **Scan all eligible SGX stocks**. Full-market scans can take time because both daily and intraday data are downloaded.
+## Daily vs Hourly mode
+
+The app has a **Candle timeframe** switch:
+
+- **Daily**: all rules use completed daily candles. Only setups triggered in the latest **3 completed SGX trading days** are shown.
+- **Hourly**: all rules use completed **60-minute candles**. Only setups triggered in the latest **3 completed hourly SGX candles** are shown. HH/LL structure and MACD are both computed from hourly candles.
+
+Hourly mode uses Yahoo Finance intraday data. Intraday history availability is provider-dependent and can be more limited than daily history.
+
+## Output
+For each qualifying research candidate the app shows:
+- ticker and company;
+- timeframe and trigger date/time;
+- entry type and entry price;
+- +10% target;
+- LL2 stop;
+- current close;
+- MACD, signal, normalized MACD;
+- HH/LL structure timestamps;
+- candlestick chart with HH2, LL2, and +10% target lines.
 
 ## Run locally
+
+```bash
+python -m venv .venv
+```
+
+Windows:
+
+```bash
+.venv\Scripts\activate
+```
+
+macOS/Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Install and run:
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Notes on data
+## Streamlit Community Cloud
+1. Upload all repository files to GitHub.
+2. In Streamlit Community Cloud create/deploy the app from that repository.
+3. Main file path: `app.py`.
+4. No API key or uploaded transaction file is required.
 
-- Daily and intraday price/activity bars are downloaded from Yahoo Finance through `yfinance`.
-- The SGX universe is loaded dynamically, with REITs and business trusts excluded before scanning.
-- Yahoo coverage can be incomplete for suspended, newly listed, or very illiquid counters. The dashboard reports actual usable coverage rather than assuming every security was successfully downloaded.
-- The activity test is a conservative lower-bound verification, not SGX's official per-counter transaction-count field. Exact historical trade counts would require a market-data source that licenses that field.
+## Important
+This is a technical research screener, not an investment recommendation. Free public data feeds can have missing/delayed SGX records, especially intraday and illiquid counters. The app reports actual usable OHLC coverage after each scan.

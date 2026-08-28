@@ -4,7 +4,7 @@ import pandas as pd
 
 
 def macd_frame(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
-    """Return Close, MACD, Signal and normalized MACD percent for a single ticker."""
+    """Return Close, MACD, Signal and MACD as percent of price."""
     if df is None or df.empty or "Close" not in df.columns:
         return pd.DataFrame(columns=["Close", "MACD", "Signal", "MACD_pct"])
 
@@ -19,16 +19,12 @@ def macd_frame(df: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9
     ema_slow = close.ewm(span=slow, adjust=False).mean()
     macd = ema_fast - ema_slow
     signal_line = macd.ewm(span=signal, adjust=False).mean()
-    macd_pct = (macd / close) * 100.0
-
-    return pd.DataFrame(
-        {
-            "Close": close,
-            "MACD": macd,
-            "Signal": signal_line,
-            "MACD_pct": macd_pct,
-        }
-    )
+    return pd.DataFrame({
+        "Close": close,
+        "MACD": macd,
+        "Signal": signal_line,
+        "MACD_pct": (macd / close) * 100.0,
+    })
 
 
 def macd_qualifies(
@@ -36,24 +32,26 @@ def macd_qualifies(
     as_of_date: pd.Timestamp,
     near_zero_floor_pct: float = -0.5,
     rising_days: int = 3,
+    *,
+    exact_timestamp: bool = False,
 ) -> tuple[bool, dict]:
-    """Check the user's bullish-near-zero MACD condition on a specific trading date.
+    """Check MACD(12,26,9): rising 3 candles, above signal, near/above zero.
 
-    Rules:
-    - standard MACD(12,26,9)
-    - MACD must rise on each of the last `rising_days` observations
-    - MACD must be above the signal line on the as-of date
-    - normalized MACD must be >= `near_zero_floor_pct` of closing price
-      (default -0.5%), allowing a slightly negative MACD approaching zero
+    ``rising_days`` means candles, not necessarily days. In Hourly mode, the app
+    passes ``exact_timestamp=True`` so no later hourly candle can leak into the
+    MACD decision for an earlier breakout candle.
     """
     frame = macd_frame(df)
     if frame.empty:
         return False, {"reason": "No MACD data"}
 
-    target = pd.Timestamp(as_of_date).normalize()
-    idx = pd.to_datetime(frame.index)
-    normalized = pd.DatetimeIndex(idx).normalize()
-    matches = frame.loc[normalized <= target]
+    target = pd.Timestamp(as_of_date)
+    idx = pd.DatetimeIndex(pd.to_datetime(frame.index))
+    if exact_timestamp:
+        matches = frame.loc[idx <= target]
+    else:
+        matches = frame.loc[idx.normalize() <= target.normalize()]
+
     if len(matches) < rising_days:
         return False, {"reason": "Insufficient MACD history"}
 

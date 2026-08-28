@@ -159,17 +159,23 @@ def scan_one(df: pd.DataFrame) -> dict | None:
 def most_recent_triggered_setup(
     df: pd.DataFrame,
     eligible_dates: Iterable[pd.Timestamp] | None = None,
+    *,
+    exact_timestamp: bool = False,
 ) -> PatternSetup | None:
-    """Return the newest triggered setup, optionally restricted to exact market dates.
+    """Return the newest triggered setup in an allowed recent window.
 
-    `eligible_dates` is intended for screens such as "triggered in the latest 3
-    trading days". Using explicit trading dates is safer than subtracting calendar
-    days because weekends and SGX holidays are naturally handled.
+    Daily mode passes market dates and uses date matching. Hourly mode passes the
+    latest completed hourly timestamps with ``exact_timestamp=True`` so the same
+    pattern is evaluated candle-for-candle without collapsing hours into dates.
     """
     setups = [s for s in find_all_setups(df) if s.status == "TRIGGERED" and s.breakout_date is not None]
     if eligible_dates is not None:
-        allowed = {pd.Timestamp(d).normalize() for d in eligible_dates}
-        setups = [s for s in setups if pd.Timestamp(s.breakout_date).normalize() in allowed]
+        if exact_timestamp:
+            allowed = {pd.Timestamp(d) for d in eligible_dates}
+            setups = [s for s in setups if pd.Timestamp(s.breakout_date) in allowed]
+        else:
+            allowed = {pd.Timestamp(d).normalize() for d in eligible_dates}
+            setups = [s for s in setups if pd.Timestamp(s.breakout_date).normalize() in allowed]
     if not setups:
         return None
     return max(setups, key=lambda s: pd.Timestamp(s.breakout_date))
