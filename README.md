@@ -1,84 +1,34 @@
-# SGX Recent Trigger Scanner
+# SGX Multi-Condition Stock Scanner
 
-A Streamlit technical-research screener for SGX-listed securities.
+A Streamlit scanner for SGX-listed operating-company stocks. Penny stocks are included; REITs and business trusts are excluded.
 
-## Current universe rule
+## Screening rules
 
-The app uses the live SGX company/securities universe and then **excludes REITs and business trusts before scanning**.
+A counter is shortlisted only when all conditions pass:
 
-- Penny stocks: **included**
-- Mainboard / Catalist operating-company counters: **included**
-- No minimum price: **yes**
-- No minimum market cap: **yes**
-- No minimum volume: **yes**
-- REITs: **excluded**
-- Business trusts / listed trusts: **excluded**
+1. **Price structure** — find 3 consecutive higher highs, then the nearest subsequent 3 consecutive lower lows. Use HH Day 2 as the upper trigger and LL Day 2 as the invalidation level. A valid trigger occurs when a later candle opens or closes above HH2 without any earlier post-setup candle opening or closing below LL2. Only triggers from the latest 3 completed SGX trading days are shown.
+2. **MACD (12,26,9)** — MACD is rising for 3 consecutive trading days, is above the signal line, and is either positive or no lower than the configurable near-zero floor (default -0.5% of share price).
+3. **Activity** — no upload is required. The app automatically downloads 5-minute Yahoo intraday data. Every one of the prior 20 completed SGX trading days must contain at least 5 separate positive-volume 5-minute bars. Five such bars prove at least five trades occurred that day. This is deliberately conservative because the free Yahoo feed does not expose SGX's exact daily number-of-trades field; a thin counter with 5 trades clustered inside fewer than 5 bars may be rejected.
 
-The dashboard shows the 604-security reference baseline, the actual number returned by the live source, how many trusts were removed, and the final eligible count. It never silently claims a full-market scan when the source or Yahoo Finance did not provide complete data.
+The app also displays a +10% target and the LL2 stop reference. It is a research screener, not an automatic investment recommendation.
 
-## Technical rule
+## Deploy on Streamlit Community Cloud
 
-For every eligible counter:
-
-1. Find three consecutive candles with progressively higher highs (`H1 < H2 < H3`).
-2. Store the **High of Day 2 (HH2)** as the upper trigger.
-3. Find the **nearest subsequent** three consecutive candles with progressively lower lows (`L1 > L2 > L3`).
-4. Store the **Low of Day 2 (LL2)** as the invalidation/stop level.
-5. Starting after LL3, trigger when **Open or Close > HH2**, provided no earlier Open or Close fell below LL2.
-6. Display only signals that triggered on one of the **latest 3 completed SGX trading days**.
-7. Entry reference is the breakout Open if Open > HH2; otherwise the breakout Close.
-8. Profit target is **+10% from entry**. LL2 remains the stop/invalidation level.
-
-Intraday wicks below LL2 do not invalidate the setup unless the Open or Close is below LL2.
-
-## Price data and coverage
-
-Daily OHLC data is downloaded from Yahoo Finance using `yfinance` and batched for Streamlit Cloud performance. Today's still-forming daily candle is excluded until after a conservative 17:15 Singapore-time cutoff.
-
-The app reports:
-
-- eligible counters after trust exclusions;
-- counters with usable Yahoo OHLC data;
-- counters with missing/insufficient data; and
-- number triggered within the latest 3 trading days.
-
-If the live SGX universe source cannot be loaded, the app stops rather than silently falling back to the old 25-counter starter list.
-
-## Deploy to Streamlit Community Cloud
-
-Use:
-
-- Repository: your GitHub repository
-- Branch: `main`
-- Main file path: `app.py`
-
-Streamlit will redeploy automatically after you push the updated files to `main`.
+1. Upload all files in this folder to the root of your GitHub repository.
+2. In Streamlit Community Cloud, deploy the repository with `app.py` as the main file.
+3. No API key and no transaction CSV upload are required.
+4. Press **Scan all eligible SGX stocks**. Full-market scans can take time because both daily and intraday data are downloaded.
 
 ## Run locally
 
 ```bash
-python -m venv .venv
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Tests
+## Notes on data
 
-```bash
-pytest -q
-```
-
-## Files
-
-- `app.py` — dashboard, coverage reporting, and recent-trigger output
-- `scanner.py` — HH/LL pattern engine
-- `data.py` — SGX universe filtering and Yahoo Finance price data
-- `requirements.txt` — dependencies
-- `.streamlit/config.toml` — Streamlit configuration
-- `test_scanner.py` — pattern tests
-- `test_recent_trigger.py` — latest-3-trading-days tests
-- `test_universe_filter.py` — REIT/business-trust exclusion tests
-
-## Important
-
-This is a technical screening/research tool, not an investment recommendation. Market-data sources can contain missing, delayed, suspended, or corporate-action-affected observations; verify any signal before use.
+- Daily and intraday price/activity bars are downloaded from Yahoo Finance through `yfinance`.
+- The SGX universe is loaded dynamically, with REITs and business trusts excluded before scanning.
+- Yahoo coverage can be incomplete for suspended, newly listed, or very illiquid counters. The dashboard reports actual usable coverage rather than assuming every security was successfully downloaded.
+- The activity test is a conservative lower-bound verification, not SGX's official per-counter transaction-count field. Exact historical trade counts would require a market-data source that licenses that field.
