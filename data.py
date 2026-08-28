@@ -112,6 +112,13 @@ def _fetch_stockanalysis_universe() -> pd.DataFrame:
     for page in range(1, 6):
         url = STOCKANALYSIS_SGX_URL if page == 1 else f"{STOCKANALYSIS_SGX_URL}?page={page}"
         response = requests.get(url, timeout=25, headers=_HEADERS)
+
+        # StockAnalysis returns HTTP 404 when a requested pagination page does
+        # not exist. If earlier pages were already collected, that simply means
+        # we reached the end of the list and is not a universe-loading failure.
+        if response.status_code == 404 and frames:
+            break
+
         response.raise_for_status()
         frame = _extract_stockanalysis_table(response.text)
         if frame.empty:
