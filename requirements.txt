@@ -3,3 +3,4 @@ pandas>=2.2,<3.0
 yfinance>=0.2.54,<1.0
 plotly>=5.24,<7.0
 requests
+lxml>=5.0,<7.0

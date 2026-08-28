@@ -6,6 +6,7 @@ import streamlit as st
 
 from data import (
     OFFICIAL_SGX_BASELINE,
+    OFFICIAL_SGX_BASELINE_LABEL,
     download_history,
     download_histories,
     latest_market_bars,
@@ -77,21 +78,29 @@ except Exception as exc:
 
 st.subheader("Universe coverage")
 c1, c2, c3, c4 = st.columns(4)
-c1.metric("SGX reference baseline", OFFICIAL_SGX_BASELINE)
-c2.metric("Live securities loaded", universe_stats["source_records"])
-c3.metric("REITs / trusts removed", universe_stats["excluded_reit_trust"])
-c4.metric("Eligible counters", universe_stats["eligible"])
+c1.metric("604 reference", OFFICIAL_SGX_BASELINE)
+c2.metric("Current market symbols loaded", universe_stats["source_records"])
+c3.metric("Non-eligible removed", universe_stats["excluded_total"])
+c4.metric("Eligible stock counters", universe_stats["eligible"])
 
-if universe_stats["source_records"] != OFFICIAL_SGX_BASELINE:
-    st.warning(
-        f"The live source returned {universe_stats['source_records']} unique securities versus the "
-        f"{OFFICIAL_SGX_BASELINE}-security reference baseline. Actual live coverage is shown rather than claiming a fixed count."
-    )
+st.caption(f"Reference: {OFFICIAL_SGX_BASELINE_LABEL}. The reference is historical; the live market count can change with listings and delistings.")
 
-st.caption(
-    f"Universe source: {universe_source}. Removed: {universe_stats['excluded_reit']} REIT-classified and "
-    f"{universe_stats['excluded_business_trust']} trust/business-trust-classified counters."
+st.markdown(
+    f"**Universe exclusions:** REITs **{universe_stats['excluded_reit']}** · "
+    f"Business trusts/trusts **{universe_stats['excluded_business_trust']}** · "
+    f"ETFs/funds **{universe_stats['excluded_etf_fund']}** · "
+    f"Global Quote/SDR **{universe_stats['excluded_global_quote']}**"
 )
+st.caption(
+    f"Universe source: {universe_source}. SGX Global Quote names discovered for classification: "
+    f"{universe_stats['global_quote_names_loaded']}. Penny stocks are retained; no minimum price, market-cap or volume filter is applied."
+)
+
+if universe_stats["source_records"] < 400:
+    st.error(
+        "The broad market source returned fewer than 400 symbols. The app will not describe this as full-market coverage. "
+        "Try again later before relying on the shortlist."
+    )
 
 state_key = f"scan_{mode.lower()}"
 if state_key not in st.session_state:
