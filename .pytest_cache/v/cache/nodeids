@@ -1,6 +1,21 @@
 [
+  "test_hourly.py::test_completed_hourly_bars_drops_current_unfinished_bar",
+  "test_hourly.py::test_hourly_exact_timestamp_filter",
+  "test_hourly.py::test_latest_market_bars_preserves_hours",
+  "test_hourly.py::test_macd_hourly_asof_has_no_future_leakage",
+  "test_indicators.py::test_macd_qualifies_when_rising_near_zero_and_above_signal",
+  "test_indicators.py::test_macd_rejects_falling_series",
   "test_recent_trigger.py::test_recent_filter_accepts_breakout_date",
   "test_recent_trigger.py::test_recent_filter_rejects_old_breakout",
   "test_scanner.py::test_invalidated_before_breakout",
-  "test_scanner.py::test_triggered_setup"
+  "test_scanner.py::test_triggered_setup",
+  "test_universe_filter.py::test_excludes_business_trust_phrase",
+  "test_universe_filter.py::test_excludes_named_trust_without_subtype",
+  "test_universe_filter.py::test_excludes_reit_by_classification",
+  "test_universe_filter.py::test_excludes_reit_by_name",
+  "test_universe_filter.py::test_keeps_operating_company_and_penny_stock",
+  "test_universe_source.py::test_global_quote_exclusion_by_normalised_name",
+  "test_universe_source.py::test_penny_company_is_not_excluded",
+  "test_universe_source.py::test_reit_and_business_trust_exclusions",
+  "test_universe_source.py::test_stockanalysis_table_parsing"
 ]
