@@ -1,1 +1,6 @@
-
+[
+  "test_recent_trigger.py::test_recent_filter_accepts_breakout_date",
+  "test_recent_trigger.py::test_recent_filter_rejects_old_breakout",
+  "test_scanner.py::test_invalidated_before_breakout",
+  "test_scanner.py::test_triggered_setup"
+]
