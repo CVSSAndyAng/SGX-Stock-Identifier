@@ -71,17 +71,51 @@ def exclusion_reason(row: dict, global_quote_names: set[str] | None = None) -> s
 
     if global_quote_names and norm in global_quote_names:
         return "Global Quote / SDR"
+
+    # Detect ETFs/funds BEFORE generic REIT/TRUST rules. Many ETFs have names such
+    # as "SPDR ... ETF Trust", and some REIT ETFs contain the token "REIT". If
+    # trust/REIT is checked first, those securities are excluded correctly but are
+    # misclassified, which previously made the dashboard show ETFs/funds = 0.
+    etf_fund_patterns = (
+        r"\bETF\b",
+        r"\bE T F\b",
+        r"EXCHANGE[ -]?TRADED FUND",
+        r"\bUCITS\b",
+        r"\bINDEX FUND\b",
+        r"\bBOND FUND\b",
+        r"\bEQUITY FUND\b",
+        r"\bMONEY MARKET FUND\b",
+        r"\bMUTUAL FUND\b",
+        r"\bUNIT TRUST FUND\b",
+    )
+    if any(re.search(pattern, text) for pattern in etf_fund_patterns):
+        return "ETF / Fund"
+
+    # Common ETF/fund providers can occasionally appear in source names without
+    # an explicit ETF token. Keep these checks conservative and provider-specific.
+    fund_provider_patterns = (
+        r"\bISHARES\b",
+        r"\bSPDR\b",
+        r"\bXTRACKERS\b",
+        r"\bNIKKO\s*AM\b",
+        r"\bLION[ -]?PHILLIP",
+        r"\bPHILLIP\s+SING\s+INCOME",
+        r"\bABF\s+SINGAPORE\s+BOND\s+INDEX",
+    )
+    if any(re.search(pattern, text) for pattern in fund_provider_patterns):
+        return "ETF / Fund"
+
+    # Generic 'Fund' names are funds unless the token is merely part of a normal
+    # company word such as 'Fundamental'.
+    if re.search(r"\bFUND\b", text) and not re.search(r"\bFUNDAMENT", text):
+        return "ETF / Fund"
+
     if re.search(r"\bREIT\b", text) or "REAL ESTATE INVESTMENT TRUST" in text:
         return "REIT"
     if "BUSINESS TRUST" in text or "STAPLED TRUST" in text:
         return "Business Trust"
     if re.search(r"\bTRUST\b", text):
         return "Trust / Business Trust"
-    if re.search(r"\bETF\b", text) or "EXCHANGE TRADED FUND" in text:
-        return "ETF / Fund"
-    # Bond/index funds can sometimes be labelled without the literal ETF token.
-    if re.search(r"\bFUND\b", text) and not re.search(r"\bFUNDAMENT", text):
-        return "ETF / Fund"
     return None
 
 
