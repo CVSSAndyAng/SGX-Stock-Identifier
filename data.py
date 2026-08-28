@@ -103,37 +103,36 @@ def _extract_stockanalysis_table(html: str) -> pd.DataFrame:
 
 
 def _fetch_stockanalysis_universe() -> pd.DataFrame:
-    """Fetch all pages of StockAnalysis's current SGX stock list."""
+    """Fetch the current SGX stock list from the known valid list pages.
+
+    StockAnalysis currently exposes the Singapore list on page 1 and page 2.
+    We intentionally do not probe page 3 because the site returns HTTP 404 for
+    non-existent pagination pages. This keeps a harmless end-of-list response
+    from disabling the whole scanner.
+    """
     frames: list[pd.DataFrame] = []
     seen_codes: set[str] = set()
 
-    # At present the list fits within two pages, but allow several pages so the
-    # code remains safe if the site changes its page size.
-    for page in range(1, 6):
-        url = STOCKANALYSIS_SGX_URL if page == 1 else f"{STOCKANALYSIS_SGX_URL}?page={page}"
+    urls = [
+        STOCKANALYSIS_SGX_URL,
+        f"{STOCKANALYSIS_SGX_URL}?page=2",
+    ]
+
+    for url in urls:
         response = requests.get(url, timeout=25, headers=_HEADERS)
-
-        # StockAnalysis returns HTTP 404 when a requested pagination page does
-        # not exist. If earlier pages were already collected, that simply means
-        # we reached the end of the list and is not a universe-loading failure.
-        if response.status_code == 404 and frames:
-            break
-
         response.raise_for_status()
         frame = _extract_stockanalysis_table(response.text)
         if frame.empty:
-            break
+            continue
         new_codes = set(frame["Code"]) - seen_codes
         if not new_codes:
-            break
+            continue
         frames.append(frame[frame["Code"].isin(new_codes)])
         seen_codes.update(new_codes)
-        # A short final page means there should not be another page.
-        if len(frame) < 100 and page > 1:
-            break
 
     if not frames:
         raise ValueError("Current SGX market list returned no usable stock symbols.")
+
     out = pd.concat(frames, ignore_index=True).drop_duplicates("Code", keep="first")
     return out.reset_index(drop=True)
 
