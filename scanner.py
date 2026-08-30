@@ -179,3 +179,72 @@ def most_recent_triggered_setup(
     if not setups:
         return None
     return max(setups, key=lambda s: pd.Timestamp(s.breakout_date))
+
+
+@dataclass
+class HigherHighCloseBreakout:
+    """Three-higher-high structure confirmed by a Close above HH2, with no LL requirement."""
+    hh1_date: pd.Timestamp
+    hh2_date: pd.Timestamp
+    hh3_date: pd.Timestamp
+    upper_trigger: float
+    breakout_date: pd.Timestamp
+    breakout_close: float
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def find_hh_close_breakouts(df: pd.DataFrame) -> list[HigherHighCloseBreakout]:
+    """Find HH1 < HH2 < HH3 structures whose Close subsequently exceeds HH2.
+
+    The first qualifying close is searched from HH3 onward, so HH3 itself may
+    confirm the breakout when its close is above the high of HH2. No lower-low
+    sequence or invalidation test is used in this mode.
+    """
+    prices = _normalise_ohlc(df)
+    if len(prices) < 3:
+        return []
+
+    out: list[HigherHighCloseBreakout] = []
+    n = len(prices)
+    for i in range(2, n):
+        h1 = float(prices["High"].iloc[i - 2])
+        h2 = float(prices["High"].iloc[i - 1])
+        h3 = float(prices["High"].iloc[i])
+        if not (h1 < h2 < h3):
+            continue
+
+        for k in range(i, n):
+            cl = float(prices["Close"].iloc[k])
+            if cl > h2:
+                out.append(HigherHighCloseBreakout(
+                    hh1_date=pd.Timestamp(prices.index[i - 2]),
+                    hh2_date=pd.Timestamp(prices.index[i - 1]),
+                    hh3_date=pd.Timestamp(prices.index[i]),
+                    upper_trigger=h2,
+                    breakout_date=pd.Timestamp(prices.index[k]),
+                    breakout_close=cl,
+                ))
+                break
+    return out
+
+
+def most_recent_hh_close_breakout(
+    df: pd.DataFrame,
+    eligible_dates: Iterable[pd.Timestamp] | None = None,
+    *,
+    exact_timestamp: bool = False,
+) -> HigherHighCloseBreakout | None:
+    """Return the newest HH2 close breakout in the allowed recent window."""
+    setups = find_hh_close_breakouts(df)
+    if eligible_dates is not None:
+        if exact_timestamp:
+            allowed = {pd.Timestamp(d) for d in eligible_dates}
+            setups = [s for s in setups if pd.Timestamp(s.breakout_date) in allowed]
+        else:
+            allowed = {pd.Timestamp(d).normalize() for d in eligible_dates}
+            setups = [s for s in setups if pd.Timestamp(s.breakout_date).normalize() in allowed]
+    if not setups:
+        return None
+    return max(setups, key=lambda s: pd.Timestamp(s.breakout_date))

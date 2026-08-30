@@ -14,7 +14,7 @@ from data import (
     load_sgx_universe,
 )
 from indicators import macd_qualifies
-from scanner import most_recent_triggered_setup
+from scanner import most_recent_hh_close_breakout, most_recent_triggered_setup
 
 RECENT_CANDLES = 3
 DEFAULT_MACD_NEAR_ZERO_PCT = 0.5
@@ -126,6 +126,11 @@ st.caption(
 with st.sidebar:
     st.header("Scan settings")
     mode = st.radio("Candle timeframe", ["Daily", "Hourly"], horizontal=True)
+    price_mode = st.radio(
+        "Price setup",
+        ["Full HH → LL confirmation", "HH2 close breakout only"],
+        help="HH2 close breakout only ignores the lower-low sequence and requires Close > HH2.",
+    )
 
     if mode == "Daily":
         period = st.selectbox("Historical lookback", ["6mo", "1y", "2y", "5y"], index=2)
@@ -154,7 +159,9 @@ with st.sidebar:
 with st.expander("Active conditions", expanded=False):
     st.markdown(
         """
-**Price structure:** 3 consecutive higher highs → nearest subsequent 3 consecutive lower lows → HH2 is the upper trigger and LL2 is the invalidation level. After LL3, a setup triggers when Open or Close rises above HH2, provided no earlier Open or Close fell below LL2.
+**Price structure — Full HH → LL confirmation:** 3 consecutive higher highs → nearest subsequent 3 consecutive lower lows → HH2 is the upper trigger and LL2 is the invalidation level. After LL3, a setup triggers when Open or Close rises above HH2, provided no earlier Open or Close fell below LL2.
+
+**Price structure — HH2 close breakout only:** 3 consecutive higher highs → HH2 is the upper trigger → from HH3 onward, the first candle with **Close > HH2** triggers. No lower-low sequence or LL invalidation is required.
 
 **MACD confirmation:** MACD(12,26,9) must be rising across the latest 3 candles as of the trigger candle, be above its signal line, and be at or above the configured near-zero floor.
 """
@@ -199,12 +206,12 @@ if universe_stats["source_records"] < 400:
         "Try again later before relying on the shortlist."
     )
 
-state_key = f"scan_{mode.lower()}"
+state_key = f"scan_{mode.lower()}_{'hh_only' if price_mode == 'HH2 close breakout only' else 'hh_ll'}"
 if state_key not in st.session_state:
     st.session_state[state_key] = {"results": pd.DataFrame(), "recent": [], "coverage": {}}
 
 scan_clicked = st.button(
-    f"Scan all eligible SGX stocks — {mode}",
+    f"Scan all eligible SGX stocks — {mode} — {price_mode}",
     type="primary",
     use_container_width=True,
 )
@@ -239,7 +246,10 @@ if scan_clicked:
             continue
 
         try:
-            setup = most_recent_triggered_setup(history, eligible_dates=recent, exact_timestamp=exact_timestamp)
+            if price_mode == "HH2 close breakout only":
+                setup = most_recent_hh_close_breakout(history, eligible_dates=recent, exact_timestamp=exact_timestamp)
+            else:
+                setup = most_recent_triggered_setup(history, eligible_dates=recent, exact_timestamp=exact_timestamp)
             if setup is None:
                 progress.progress(pos / total)
                 continue
@@ -262,12 +272,18 @@ if scan_clicked:
                 close_col = close_col.iloc[:, 0]
             current_close = float(pd.to_numeric(close_col, errors="coerce").dropna().iloc[-1])
 
-            if setup.breakout_open is not None and setup.breakout_open > setup.upper_trigger:
+            if price_mode == "HH2 close breakout only":
+                entry_price = float(setup.breakout_close)
+                entry_type = "Close"
+                ll2_stop = None
+            elif setup.breakout_open is not None and setup.breakout_open > setup.upper_trigger:
                 entry_price = float(setup.breakout_open)
                 entry_type = "Open"
+                ll2_stop = float(setup.lower_invalidation)
             else:
                 entry_price = float(setup.breakout_close)
                 entry_type = "Close"
+                ll2_stop = float(setup.lower_invalidation)
 
             target_10 = entry_price * 1.10
             trigger_ts = pd.Timestamp(setup.breakout_date)
@@ -279,7 +295,7 @@ if scan_clicked:
                 "Entry Type": entry_type,
                 "Entry Price": round(entry_price, 4),
                 "+10% Target": round(target_10, 4),
-                "LL2 Stop": round(setup.lower_invalidation, 4),
+                "LL2 Stop": round(ll2_stop, 4) if ll2_stop is not None else None,
                 "Current Close": round(current_close, 4),
                 "MACD": round(macd_details["macd"], 6),
                 "MACD Signal": round(macd_details["signal"], 6),
@@ -288,9 +304,9 @@ if scan_clicked:
                 "HH1": pd.Timestamp(setup.hh1_date),
                 "HH2": pd.Timestamp(setup.hh2_date),
                 "HH3": pd.Timestamp(setup.hh3_date),
-                "LL1": pd.Timestamp(setup.ll1_date),
-                "LL2": pd.Timestamp(setup.ll2_date),
-                "LL3": pd.Timestamp(setup.ll3_date),
+                "LL1": pd.Timestamp(setup.ll1_date) if hasattr(setup, "ll1_date") else pd.NaT,
+                "LL2": pd.Timestamp(setup.ll2_date) if hasattr(setup, "ll2_date") else pd.NaT,
+                "LL3": pd.Timestamp(setup.ll3_date) if hasattr(setup, "ll3_date") else pd.NaT,
             })
         except Exception:
             pass
@@ -302,6 +318,7 @@ if scan_clicked:
         "results": pd.DataFrame(rows),
         "recent": recent,
         "coverage": {
+            "price_mode": price_mode,
             "eligible": len(tickers),
             "usable": usable_count,
             "unavailable": len(tickers) - usable_count,
@@ -339,7 +356,7 @@ if results.empty:
         st.info(f"Press **Scan all eligible SGX stocks — {mode}** to run the screen.")
 else:
     results = results.sort_values(["Trigger", "Ticker"], ascending=[False, True]).reset_index(drop=True)
-    st.subheader(f"{mode} shortlist — research candidates")
+    st.subheader(f"{mode} shortlist — {price_mode} — research candidates")
     shortlist_cols = [
         "Ticker", "Company", "Trigger", "Entry Price", "+10% Target", "LL2 Stop",
         "Current Close", "MACD", "MACD Signal", "MACD % of Price",
@@ -365,12 +382,13 @@ else:
         name=ticker_choice,
     )])
     fig.add_hline(y=float(selected["HH2 Trigger"]), line_dash="dash", annotation_text="HH2 trigger")
-    fig.add_hline(y=float(selected["LL2 Stop"]), line_dash="dot", annotation_text="LL2 stop")
+    if pd.notna(selected["LL2 Stop"]):
+        fig.add_hline(y=float(selected["LL2 Stop"]), line_dash="dot", annotation_text="LL2 stop")
     fig.add_hline(y=float(selected["+10% Target"]), line_dash="dashdot", annotation_text="+10% target")
     fig.update_layout(
         height=500,
         xaxis_rangeslider_visible=False,
-        title=f"{ticker_choice} — {mode} qualifying setup",
+        title=f"{ticker_choice} — {mode} — {price_mode}",
         margin=dict(l=8, r=8, t=55, b=20),
         legend=dict(orientation="h"),
     )
