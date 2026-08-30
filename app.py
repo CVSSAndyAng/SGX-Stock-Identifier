@@ -123,34 +123,49 @@ st.caption(
     "Choose Daily or Hourly candles; Condition 2 / transaction activity has been removed."
 )
 
-with st.sidebar:
-    st.header("Scan settings")
-    mode = st.radio("Candle timeframe", ["Daily", "Hourly"], horizontal=True)
-    price_mode = st.radio(
-        "Price setup",
-        ["Full HH → LL confirmation", "HH2 close breakout only"],
-        help="HH2 close breakout only ignores the lower-low sequence and requires Close > HH2.",
-    )
+st.subheader("Scan options")
 
-    if mode == "Daily":
-        period = st.selectbox("Historical lookback", ["6mo", "1y", "2y", "5y"], index=2)
-        interval = "1d"
-        window_label = "latest 3 completed SGX trading days"
-    else:
-        # Yahoo intraday history is more constrained than daily history. Six months
-        # gives hundreds of 60-minute candles and ample MACD/pattern warm-up.
-        period = st.selectbox("Hourly lookback", ["1mo", "3mo", "6mo", "1y"], index=2)
-        interval = "60m"
-        window_label = "latest 3 completed 1-hour SGX candles"
+with st.container(border=True):
+    option_col1, option_col2 = st.columns(2)
 
-    macd_near_zero_pct = st.slider(
-        "MACD near-zero allowance (% of price)",
-        min_value=0.1,
-        max_value=2.0,
-        value=DEFAULT_MACD_NEAR_ZERO_PCT,
-        step=0.1,
-        help="MACD may still be slightly negative while rising toward zero. Default floor: -0.5% of price.",
-    )
+    with option_col1:
+        mode = st.radio(
+            "Candle timeframe",
+            ["Daily", "Hourly"],
+            horizontal=True,
+            key="candle_timeframe",
+        )
+
+    with option_col2:
+        price_mode = st.radio(
+            "Price setup",
+            ["Full HH → LL confirmation", "HH2 close breakout only"],
+            horizontal=False,
+            key="price_setup",
+            help="HH2 close breakout only ignores the lower-low sequence and requires Close > HH2.",
+        )
+
+    settings_col1, settings_col2 = st.columns(2)
+
+    with settings_col1:
+        if mode == "Daily":
+            period = st.selectbox("Historical lookback", ["6mo", "1y", "2y", "5y"], index=2)
+            interval = "1d"
+            window_label = "latest 3 completed SGX trading days"
+        else:
+            period = st.selectbox("Hourly lookback", ["1mo", "3mo", "6mo", "1y"], index=2)
+            interval = "60m"
+            window_label = "latest 3 completed 1-hour SGX candles"
+
+    with settings_col2:
+        macd_near_zero_pct = st.slider(
+            "MACD near-zero allowance (% of price)",
+            min_value=0.1,
+            max_value=2.0,
+            value=DEFAULT_MACD_NEAR_ZERO_PCT,
+            step=0.1,
+            help="MACD may still be slightly negative while rising toward zero. Default floor: -0.5% of price.",
+        )
 
     st.info(f"Signal window: **{window_label}**.")
     st.caption("MACD: 12/26/9, rising for 3 candles, above signal, and not below the selected near-zero floor.")
