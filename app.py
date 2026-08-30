@@ -19,7 +19,104 @@ from scanner import most_recent_triggered_setup
 RECENT_CANDLES = 3
 DEFAULT_MACD_NEAR_ZERO_PCT = 0.5
 
-st.set_page_config(page_title="SGX HH/LL + MACD Scanner", page_icon="📈", layout="wide")
+st.set_page_config(
+    page_title="SGX HH/LL + MACD Scanner",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# Responsive styling for phones and small tablets. This changes presentation only;
+# screening logic and calculations remain untouched.
+st.markdown(
+    """
+    <style>
+    /* Comfortable desktop spacing while preserving Streamlit's responsive width. */
+    .block-container {
+        padding-top: 1.25rem;
+        padding-bottom: 2rem;
+        max-width: 1400px;
+    }
+
+    /* Make primary actions easy to tap. */
+    div.stButton > button,
+    div.stDownloadButton > button {
+        min-height: 2.8rem;
+        border-radius: 0.65rem;
+    }
+
+    /* Prevent long table contents from breaking the page width. */
+    [data-testid="stDataFrame"] {
+        max-width: 100%;
+        overflow-x: auto;
+    }
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding-top: 0.75rem !important;
+            padding-left: 0.8rem !important;
+            padding-right: 0.8rem !important;
+            padding-bottom: 1.5rem !important;
+        }
+
+        h1 {
+            font-size: 1.75rem !important;
+            line-height: 1.15 !important;
+            margin-bottom: 0.4rem !important;
+        }
+        h2 {
+            font-size: 1.35rem !important;
+            line-height: 1.2 !important;
+        }
+        h3 {
+            font-size: 1.15rem !important;
+        }
+        p, li, label, [data-testid="stCaptionContainer"] {
+            font-size: 0.95rem !important;
+            line-height: 1.45 !important;
+        }
+
+        /* Stack Streamlit column groups vertically on phones. */
+        [data-testid="stHorizontalBlock"] {
+            flex-direction: column !important;
+            gap: 0.55rem !important;
+        }
+        [data-testid="column"] {
+            width: 100% !important;
+            flex: 1 1 100% !important;
+            min-width: 100% !important;
+        }
+
+        /* Full-width tap targets. */
+        div.stButton > button,
+        div.stDownloadButton > button {
+            width: 100% !important;
+            min-height: 3rem !important;
+            font-size: 1rem !important;
+        }
+
+        /* Keep form controls readable and touch friendly. */
+        [data-baseweb="select"] > div,
+        [data-baseweb="input"] > div,
+        [role="radiogroup"] {
+            min-height: 2.75rem;
+        }
+
+        /* Compact alert boxes on narrow screens. */
+        [data-testid="stAlert"] {
+            padding: 0.7rem 0.8rem !important;
+        }
+
+        /* Let wide result tables scroll horizontally instead of squeezing text. */
+        [data-testid="stDataFrame"] > div {
+            overflow-x: auto !important;
+        }
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("SGX HH/LL + MACD Stock Scanner")
 st.caption(
     "All eligible SGX stocks including penny stocks, excluding REITs and business trusts. "
@@ -54,14 +151,14 @@ with st.sidebar:
     st.caption("MACD: 12/26/9, rising for 3 candles, above signal, and not below the selected near-zero floor.")
     st.caption("No transaction-count, volume, minimum-price, or market-cap filter.")
 
-st.subheader("Active conditions")
-st.markdown(
-    """
+with st.expander("Active conditions", expanded=False):
+    st.markdown(
+        """
 **Price structure:** 3 consecutive higher highs → nearest subsequent 3 consecutive lower lows → HH2 is the upper trigger and LL2 is the invalidation level. After LL3, a setup triggers when Open or Close rises above HH2, provided no earlier Open or Close fell below LL2.
 
 **MACD confirmation:** MACD(12,26,9) must be rising across the latest 3 candles as of the trigger candle, be above its signal line, and be at or above the configured near-zero floor.
 """
-)
+    )
 
 if mode == "Hourly":
     st.warning(
@@ -254,6 +351,7 @@ else:
         data=results.to_csv(index=False).encode("utf-8"),
         file_name=f"sgx_{mode.lower()}_shortlist.csv",
         mime="text/csv",
+        use_container_width=True,
     )
 
     st.subheader("Inspect shortlisted stock")
@@ -269,7 +367,13 @@ else:
     fig.add_hline(y=float(selected["HH2 Trigger"]), line_dash="dash", annotation_text="HH2 trigger")
     fig.add_hline(y=float(selected["LL2 Stop"]), line_dash="dot", annotation_text="LL2 stop")
     fig.add_hline(y=float(selected["+10% Target"]), line_dash="dashdot", annotation_text="+10% target")
-    fig.update_layout(height=650, xaxis_rangeslider_visible=False, title=f"{ticker_choice} — {mode} qualifying setup")
+    fig.update_layout(
+        height=500,
+        xaxis_rangeslider_visible=False,
+        title=f"{ticker_choice} — {mode} qualifying setup",
+        margin=dict(l=8, r=8, t=55, b=20),
+        legend=dict(orientation="h"),
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 st.caption(
